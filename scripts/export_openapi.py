@@ -13,7 +13,7 @@ def export_openapi():
 
     # Path to save the schema
     # We want to save it to web/public so it can be served
-    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "web", "public", "openapi.json")
+    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "surprisal-portal", "public", "openapi.json")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
