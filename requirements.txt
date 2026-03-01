@@ -1,0 +1,17 @@
+fastapi
+uvicorn
+psycopg2-binary
+sqlalchemy
+pgvector
+pydantic
+python-dotenv
+sqlmodel
+asyncpg
+httpx
+greenlet
+slowapi
+pytest
+pandas
+numpy
+sympy
+matplotlib

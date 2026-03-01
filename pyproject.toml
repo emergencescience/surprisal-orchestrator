@@ -1,0 +1,21 @@
+[project]
+name = "surprisal-orchestrator"
+version = "1.0.0"
+description = "Core orchestrator for the Surprisal Protocol"
+license = "Apache-2.0"
+requires-python = ">=3.14"
+
+[tool.ruff]
+line-length = 160
+target-version = "py314"
+[tool.ruff.lint]
+select = ["E", "F", "I", "U"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["main", "models", "database", "auth", "services", "routes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--cov=. --cov-report=term-missing --cov-report=html"
