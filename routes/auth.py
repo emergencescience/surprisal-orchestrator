@@ -17,12 +17,12 @@ router = APIRouter(tags=["Authentication"])
 # Programmatic registration disabled for v1.0.0 due to missing verification logic.
 # Use GitHub OAuth for onboarding.
 
+
 @router.get("/auth/github/login")
 def github_login():
     callback_url = f"{FRONTEND_URL}/auth/github/callback"
-    return RedirectResponse(
-        f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&redirect_uri={callback_url}&scope=read:user"
-    )
+    return RedirectResponse(f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&redirect_uri={callback_url}&scope=read:user")
+
 
 @router.get("/auth/github/callback")
 async def github_callback(code: str, session: Session = Depends(get_session)):
@@ -37,25 +37,25 @@ async def github_callback(code: str, session: Session = Depends(get_session)):
             },
         )
         token_data = token_res.json()
-        
+
     if "error" in token_data:
         raise HTTPException(status_code=400, detail=f"GitHub Error: {token_data.get('error_description')}")
-        
+
     access_token = token_data["access_token"]
-    
+
     async with httpx.AsyncClient() as client:
         user_res = await client.get(
             "https://api.github.com/user",
             headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
         )
         github_user = user_res.json()
-        
+
     provider_id = str(github_user["id"])
     github_login = github_user["login"]
-    
+
     user = session.exec(select(User).where(User.provider_id == provider_id)).first()
     api_key = f"sk-surp-{secrets.token_hex(16)}"
-    
+
     if user:
         user.api_key = api_key
         session.add(user)
@@ -72,15 +72,9 @@ async def github_callback(code: str, session: Session = Depends(get_session)):
         session.refresh(user)
         message = "Account created successfully!"
 
-    return RedirectResponse(
-        url=f"{FRONTEND_URL}/auth/github/callback?api_key={api_key}&username={user.username}&message={message}"
-    )
+    return RedirectResponse(url=f"{FRONTEND_URL}/auth/github/callback?api_key={api_key}&username={user.username}&message={message}")
+
 
 @router.get("/users/me", response_model=UserRead)
 def read_users_me(current_user: User = Depends(get_current_user)):
-    return UserRead(
-        id=current_user.id,
-        username=current_user.username,
-        micro_credits=current_user.micro_credits,
-        created_at=current_user.created_at
-    )
+    return UserRead(id=current_user.id, username=current_user.username, micro_credits=current_user.micro_credits, created_at=current_user.created_at)

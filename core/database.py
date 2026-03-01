@@ -12,12 +12,10 @@ limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
 
 engine = create_engine(DATABASE_URL)
 
+
 def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
     print("Database schema ensured.")
-
-# Destructive reset removed for safety. 
-# Use controlled migrations (Alembic) for schema changes in production.
 
 def get_session():
     with Session(engine) as session:

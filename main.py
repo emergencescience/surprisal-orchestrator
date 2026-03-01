@@ -15,11 +15,9 @@ async def lifespan(app: FastAPI):
     create_db_and_tables()
     yield
 
+
 app = FastAPI(
-    title="Surprisal Orchestrator",
-    description="The Open-Source Reference Implementation for the Surprisal Protocol.",
-    version="1.0.0",
-    lifespan=lifespan
+    title="Surprisal Orchestrator", description="The Open-Source Reference Implementation for the Surprisal Protocol.", version="1.0.0", lifespan=lifespan
 )
 
 app.state.limiter = limiter
@@ -27,7 +25,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # CORS
-origins = ["*"] # Allow all for now
+origins = ["*"]  # Allow all for now
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -43,4 +41,5 @@ app.include_router(accounts.router)
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

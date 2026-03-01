@@ -1,7 +1,7 @@
 services:
-  db:
+  database:
     image: pgvector/pgvector:pg16
-    container_name: surprisal_db
+    container_name: surprisal_database
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
@@ -16,16 +16,16 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
+  orchestrator:
     build: .
-    container_name: surprisal_api
+    container_name: surprisal_orchestrator
     depends_on:
-      db:
+      database:
         condition: service_healthy
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://postgres:password@db:5432/surprisal_db
+      DATABASE_URL: postgresql://postgres:password@database:5432/surprisal_db
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:

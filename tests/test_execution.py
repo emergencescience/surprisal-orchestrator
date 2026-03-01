@@ -34,7 +34,7 @@ class TestAdd(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
 
     def test_timeout(self):
-        # We need the solution to actually run. 
+        # We need the solution to actually run.
         # But wait, execute_submission_sync runs 'python -m unittest test_solution.py'.
         # 'test_solution.py' imports 'solution'.
         # If 'solution' has top-level infinite loop, it will hang on import.
@@ -97,9 +97,14 @@ class TestSyntax(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
         self.assertIn("Evaluation Spec Error: Security Error: Import of 'os' is forbidden", result.stderr)
 
-    def test_pass_js_rejected(self):
-        solution = "function add(a, b) { return a + b; }"
-        test = "const assert = require('assert');"
+    def test_pass_js(self):
+        solution = "function add(a, b) { return a + b; } module.exports = { add };"
+        test = """
+const { add } = require('./solution');
+const assert = require('assert');
+assert.strictEqual(add(1, 2), 3);
+console.log('JS OK');
+"""
         result = execute_submission_sync(solution, test, language="javascript")
-        self.assertEqual(result.status, "rejected")
-        self.assertIn("not supported", result.error or "")
+        self.assertEqual(result.status, "accepted")
+        self.assertIn("JS OK", result.stdout)
