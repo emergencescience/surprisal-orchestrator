@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Surprisal Orchestrator", description="The Open-Source Reference Implementation for the Surprisal Protocol.", version="1.0.0", lifespan=lifespan
+    title="Surprisal Orchestrator", description="The Open-Source Reference Implementation for the Surprisal Protocol.", version="1.1.0", lifespan=lifespan
 )
 
 app.state.limiter = limiter
