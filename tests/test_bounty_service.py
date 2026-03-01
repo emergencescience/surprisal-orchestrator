@@ -32,7 +32,7 @@ def mock_bounty(mock_user):
         id=uuid.uuid4(),
         title="Test Bounty",
         description="Test Description",
-        reward=500_000,  # 0.5 Credits
+        micro_reward=500_000,  # 0.5 Credits
         evaluation_spec="def test(): pass",
         owner_id=mock_user.id,
         idempotency_key=uuid.uuid4(),

@@ -28,4 +28,4 @@ def get_transactions(session: Session = Depends(get_session), current_user: User
     Returns the transaction history for the current user.
     """
     txs = CreditService.get_transactions(session, current_user.id)
-    return [TransactionRead(**t.model_dump(), micro_amount=t.amount) for t in txs]
+    return [TransactionRead(**t.model_dump()) for t in txs]

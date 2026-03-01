@@ -42,7 +42,7 @@ class CreditService:
                 "id": str(t.id),
                 "from_user_id": t.from_user_id,
                 "to_user_id": t.to_user_id,
-                "amount": CreditService.from_micro(t.amount),
+                "amount": CreditService.from_micro(t.micro_amount),
                 "bounty_id": t.bounty_id,
                 "submission_id": t.submission_id,
                 "type": t.type,
@@ -62,5 +62,5 @@ class CreditService:
         user.micro_credits -= CreditService.VERIFICATION_FEE
         session.add(user)
 
-        txn = Transaction(from_user_id=user.id, amount=CreditService.VERIFICATION_FEE, bounty_id=bounty_id, type="fee")
+        txn = Transaction(from_user_id=user.id, micro_amount=CreditService.VERIFICATION_FEE, bounty_id=bounty_id, type="fee")
         session.add(txn)

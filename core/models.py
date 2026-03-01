@@ -67,11 +67,11 @@ class UserRead(SQLModel):
 
 
 class Transaction(SQLModel, table=True):
-    __table_args__ = (sa.CheckConstraint("amount > 0", name="check_amount_positive"), {"extend_existing": True})
+    __table_args__ = (sa.CheckConstraint("micro_amount > 0", name="check_amount_positive"), {"extend_existing": True})
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     from_user_id: uuid.UUID | None = Field(default=None, foreign_key="user.id", index=True)
     to_user_id: uuid.UUID | None = Field(default=None, foreign_key="user.id", index=True)
-    amount: int = Field(sa_column=sa.Column(sa.BigInteger))
+    micro_amount: int = Field(sa_column=sa.Column(sa.BigInteger))
     bounty_id: uuid.UUID | None = Field(default=None, foreign_key="bounty.id", index=True)
     submission_id: uuid.UUID | None = Field(default=None, foreign_key="submission.id", index=True)
     type: TransactionType = Field(default=TransactionType.TRANSFER, sa_column=sa.Column(sa.String, default=TransactionType.TRANSFER))
@@ -99,12 +99,12 @@ class BountyBase(SQLModel):
 
 class Bounty(BountyBase, table=True):
     __table_args__ = (
-        sa.CheckConstraint("reward > 0", name="check_reward_positive"),
+        sa.CheckConstraint("micro_reward > 0", name="check_reward_positive"),
         sa.UniqueConstraint("owner_id", "idempotency_key", name="unique_bounty_idempotency"),
         {"extend_existing": True},
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    reward: int = Field(sa_column=sa.Column(sa.BigInteger))
+    micro_reward: int = Field(sa_column=sa.Column(sa.BigInteger))
     solution_template: str | None = None
     evaluation_spec: str | None = None
     runtime: str | None = Field(default="python:3.14")

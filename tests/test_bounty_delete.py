@@ -92,7 +92,7 @@ class TestBountyDelete(unittest.TestCase):
         # But our delete_bounty implementation plan involves creating a Transaction.
         refund_txns = [t for t in txns if t.type == "refund"]
         self.assertEqual(len(refund_txns), 1)
-        self.assertEqual(refund_txns[0].amount, reward_micro)
+        self.assertEqual(refund_txns[0].micro_amount, reward_micro)
 
 
 if __name__ == "__main__":

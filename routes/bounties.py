@@ -31,7 +31,7 @@ def user_id_rate_limit(request: Request):
 @limiter.limit("1/minute", key_func=user_id_rate_limit)
 def create_bounty(request: Request, bounty: BountyCreate, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     bounty_obj = BountyService.create_bounty(session, bounty, current_user)
-    return BountyRead(**bounty_obj.model_dump(), micro_reward=bounty_obj.reward)
+    return BountyRead(**bounty_obj.model_dump())
 
 
 @router.get("", response_model=list[BountyRead])
@@ -51,7 +51,7 @@ def get_bounties(
 
     bounties = session.exec(query.order_by(Bounty.created_at.desc()).offset(skip).limit(limit)).all()
 
-    return [BountyRead(**b.model_dump(), micro_reward=b.reward) for b in bounties]
+    return [BountyRead(**b.model_dump()) for b in bounties]
 
 
 @router.get("/{bounty_id}", response_model=BountyDetailRead)
@@ -59,7 +59,7 @@ def get_bounty(bounty_id: uuid.UUID, session: Session = Depends(get_session)):
     bounty = session.get(Bounty, bounty_id)
     if not bounty:
         raise HTTPException(status_code=404, detail="Bounty not found")
-    return BountyDetailRead(**bounty.model_dump(), micro_reward=bounty.reward)
+    return BountyDetailRead(**bounty.model_dump())
 
 
 @router.get("/{bounty_id}/solution")
@@ -115,4 +115,4 @@ def delete_bounty(bounty_id: uuid.UUID, session: Session = Depends(get_session),
 def get_bounties_batch(request: Request, bounty_ids: list[uuid.UUID], session: Session = Depends(get_session)):
     statement = select(Bounty).where(Bounty.id.in_(bounty_ids))
     bounties = session.exec(statement).all()
-    return [BountyRead(**b.model_dump(), micro_reward=b.reward) for b in bounties]
+    return [BountyRead(**b.model_dump()) for b in bounties]

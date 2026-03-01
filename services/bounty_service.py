@@ -91,7 +91,7 @@ class BountyService:
         bounty = Bounty(
             title=bounty_in.title,
             description=bounty_in.description,
-            reward=reward_micro,
+            micro_reward=reward_micro,
             solution_template=bounty_in.solution_template,
             evaluation_spec=bounty_in.evaluation_spec,
             owner_id=owner.id,
@@ -109,7 +109,7 @@ class BountyService:
 
         # Listing Fee Transaction
         if CreditService.LISTING_FEE > 0:
-            fee_txn = Transaction(from_user_id=owner.id, amount=CreditService.LISTING_FEE, bounty_id=bounty.id, type="fee")
+            fee_txn = Transaction(from_user_id=owner.id, micro_amount=CreditService.LISTING_FEE, bounty_id=bounty.id, type="fee")
             session.add(fee_txn)
 
         session.commit()
@@ -179,11 +179,11 @@ class BountyService:
                 bounty.status = BountyStatus.COMPLETED
                 bounty.accepted_submission_id = submission.id
 
-                solver.micro_credits += bounty.reward
+                solver.micro_credits += bounty.micro_reward
                 session.add(solver)
 
                 txn = Transaction(
-                    from_user_id=bounty.owner_id, to_user_id=solver.id, amount=bounty.reward, bounty_id=bounty.id, submission_id=submission.id, type="transfer"
+                    from_user_id=bounty.owner_id, to_user_id=solver.id, micro_amount=bounty.micro_reward, bounty_id=bounty.id, submission_id=submission.id, type="transfer"
                 )
                 session.add(txn)
                 bounty_repo.update(bounty)
@@ -212,11 +212,11 @@ class BountyService:
         if submissions:
             raise HTTPException(status_code=409, detail="Cannot delete bounty with existing submissions.")
 
-        if bounty.status != BountyStatus.DELETED and bounty.reward > 0:
-            user.micro_credits += bounty.reward
+        if bounty.status != BountyStatus.DELETED and bounty.micro_reward > 0:
+            user.micro_credits += bounty.micro_reward
             session.add(user)
 
-            txn = Transaction(to_user_id=user.id, amount=bounty.reward, bounty_id=bounty.id, type="refund")
+            txn = Transaction(to_user_id=user.id, micro_amount=bounty.micro_reward, bounty_id=bounty.id, type="refund")
             session.add(txn)
 
         bounty.status = BountyStatus.DELETED

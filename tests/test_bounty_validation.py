@@ -68,7 +68,7 @@ class TestBountyValidation(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["title"], "Valid Bounty")
-        self.assertEqual(data["reward"], 1.0)  # BountyRead returns float
+        self.assertEqual(data["micro_reward"], 1000000)
 
     def test_create_bounty_negative_reward(self):
         response = self.client.post(
