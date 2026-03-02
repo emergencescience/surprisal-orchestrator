@@ -20,6 +20,7 @@ router = APIRouter(tags=["Authentication"])
 
 @router.get("/auth/github/login")
 def github_login():
+    # Construct redirect URL for GitHub to send the code to the FRONTEND
     callback_url = f"{FRONTEND_URL}/auth/github/callback"
     return RedirectResponse(f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&redirect_uri={callback_url}&scope=read:user")
 
@@ -72,7 +73,11 @@ async def github_callback(code: str, session: Session = Depends(get_session)):
         session.refresh(user)
         message = "Account created successfully!"
 
-    return RedirectResponse(url=f"{FRONTEND_URL}/auth/github/callback?api_key={api_key}&username={user.username}&message={message}")
+    return {
+        "api_key": api_key,
+        "username": user.username,
+        "message": message
+    }
 
 
 @router.get("/users/me", response_model=UserRead)

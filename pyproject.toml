@@ -1,6 +1,6 @@
 [project]
 name = "surprisal-orchestrator"
-version = "1.1.0"
+version = "1.0.0"
 description = "Core orchestrator for the Surprisal Protocol"
 license = "Apache-2.0"
 requires-python = ">=3.14"
