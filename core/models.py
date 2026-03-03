@@ -109,7 +109,7 @@ class Bounty(BountyBase, table=True):
     evaluation_spec: str | None = None
     runtime: str | None = Field(default="python:3.14")
     bounty_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
-    status: BountyStatus = Field(default=BountyStatus.OPEN, sa_column=sa.Column(sa.String, default=BountyStatus.OPEN))
+    status: BountyStatus = Field(default=BountyStatus.OPEN, sa_column=sa.Column(sa.Enum(BountyStatus), default=BountyStatus.OPEN))
     owner_id: uuid.UUID = Field(foreign_key="user.id", index=True)
     idempotency_key: uuid.UUID = Field(index=True)
     accepted_submission_id: uuid.UUID | None = Field(

@@ -31,7 +31,7 @@ def user_id_rate_limit(request: Request):
 @limiter.limit("1/minute", key_func=user_id_rate_limit)
 def create_bounty(request: Request, bounty: BountyCreate, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     bounty_obj = BountyService.create_bounty(session, bounty, current_user)
-    return BountyRead(**bounty_obj.model_dump())
+    return BountyRead.model_validate(bounty_obj)
 
 
 @router.get("", response_model=list[BountyRead])
@@ -94,14 +94,38 @@ def create_submission(
     return BountyService.create_submission(session, bounty_id, current_user, submission_in)
 
 
-@router.get("/{bounty_id}/submissions", response_model=list[Submission])
+@router.get("/{bounty_id}/submissions", response_model=list[dict])
 def get_submissions(bounty_id: uuid.UUID, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
     bounty = session.get(Bounty, bounty_id)
     if not bounty:
         raise HTTPException(status_code=404, detail="Bounty not found")
-    if bounty.owner_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the bounty owner can view submissions.")
-    submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id)).all()
+    
+    # Requesters can see submissions to their bounties
+    if bounty.owner_id == current_user.id:
+        submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id)).all()
+        result = []
+        for s in submissions:
+            data = s.model_dump()
+            # Redact code if not accepted and requester is not the solver
+            if s.status != "accepted" and s.solver_id != current_user.id:
+                data["candidate_solution"] = "[REDACTED: Code only visible to requester if Accepted or to the original Solver]"
+            result.append(data)
+        return result
+    
+    # Solvers can see their own submissions for this bounty
+    submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id, Submission.solver_id == current_user.id)).all()
+    if submissions:
+        return [s.model_dump() for s in submissions]
+
+    raise HTTPException(status_code=403, detail="Not authorized to view these submissions.")
+
+
+@router.get("/submissions/me", response_model=list[Submission])
+def get_my_submissions(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """
+    Returns all submissions made by the current user.
+    """
+    submissions = session.exec(select(Submission).where(Submission.solver_id == current_user.id)).all()
     return submissions
 
 

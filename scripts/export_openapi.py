@@ -11,9 +11,8 @@ from main import app
 def export_openapi():
     openapi_schema = app.openapi()
 
-    # Path to save the schema
-    # We want to save it to web/public so it can be served
-    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "surprisal-portal", "public", "openapi.json")
+    # Path to save the schema in the centralized protocol directory (Project Root)
+    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "docs", "protocol", "openapi.json")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
