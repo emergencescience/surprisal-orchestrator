@@ -1,3 +1,5 @@
+import uuid
+
 from sqlmodel import Session, select
 
 from core.models import Bounty, BountyStatus, Submission
@@ -7,7 +9,7 @@ class BountyRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def get_by_id(self, bounty_id: int) -> Bounty | None:
+    def get_by_id(self, bounty_id: uuid.UUID) -> Bounty | None:
         return self.session.get(Bounty, bounty_id)
 
     def get_active(self) -> list[Bounty]:
@@ -37,6 +39,6 @@ class SubmissionRepository:
         self.session.refresh(submission)
         return submission
 
-    def get_by_bounty_id(self, bounty_id: int) -> list[Submission]:
+    def get_by_bounty_id(self, bounty_id: uuid.UUID) -> list[Submission]:
         statement = select(Submission).where(Submission.bounty_id == bounty_id)
         return self.session.exec(statement).all()

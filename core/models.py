@@ -74,7 +74,7 @@ class Transaction(SQLModel, table=True):
     micro_amount: int = Field(sa_column=sa.Column(sa.BigInteger))
     bounty_id: uuid.UUID | None = Field(default=None, foreign_key="bounty.id", index=True)
     submission_id: uuid.UUID | None = Field(default=None, foreign_key="submission.id", index=True)
-    type: TransactionType = Field(default=TransactionType.TRANSFER, sa_column=sa.Column(sa.String, default=TransactionType.TRANSFER))
+    type: str = Field(default=TransactionType.TRANSFER, sa_column=sa.Column(sa.String, default=TransactionType.TRANSFER))
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC), index=True)
 
 
@@ -109,7 +109,7 @@ class Bounty(BountyBase, table=True):
     evaluation_spec: str | None = None
     runtime: str | None = Field(default="python:3.14")
     bounty_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
-    status: BountyStatus = Field(default=BountyStatus.OPEN, sa_column=sa.Column(sa.Enum(BountyStatus), default=BountyStatus.OPEN))
+    status: str = Field(default=BountyStatus.OPEN, sa_column=sa.Column(sa.String, default=BountyStatus.OPEN))
     owner_id: uuid.UUID = Field(foreign_key="user.id", index=True)
     idempotency_key: uuid.UUID = Field(index=True)
     accepted_submission_id: uuid.UUID | None = Field(
@@ -154,7 +154,7 @@ class Submission(SubmissionBase, table=True):
     solver_id: uuid.UUID = Field(foreign_key="user.id", index=True)
     idempotency_key: uuid.UUID = Field(index=True)
     submission_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
-    status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, sa_column=sa.Column(sa.String, default=SubmissionStatus.PENDING))
+    status: str = Field(default=SubmissionStatus.PENDING, sa_column=sa.Column(sa.String, default=SubmissionStatus.PENDING))
     stdout: str | None = None
     stderr: str | None = None
     deleted_at: datetime | None = Field(default=None)

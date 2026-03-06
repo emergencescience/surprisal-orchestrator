@@ -12,7 +12,8 @@ class HttpExecutionProvider(ExecutionProvider):
             with httpx.Client(timeout=10.0) as client:
                 resp = client.post(
                     f"{self.base_url}/execute",
-                    json={"solution": solution, "test": spec, "language": language}
+                    json={"solution": solution, "test": spec, "language": language},
+                    headers={"Content-Type": "application/json"}
                 )
                 data = resp.json()
                 return ExecutionResult(

@@ -2,7 +2,7 @@ import uuid
 
 from sqlmodel import Session, select
 
-from core.models import Transaction, User
+from core.models import Transaction, TransactionType, User
 
 
 class CreditService:
@@ -62,5 +62,5 @@ class CreditService:
         user.micro_credits -= CreditService.VERIFICATION_FEE
         session.add(user)
 
-        txn = Transaction(from_user_id=user.id, micro_amount=CreditService.VERIFICATION_FEE, bounty_id=bounty_id, type="fee")
+        txn = Transaction(from_user_id=user.id, micro_amount=CreditService.VERIFICATION_FEE, bounty_id=bounty_id, type=TransactionType.FEE)
         session.add(txn)
