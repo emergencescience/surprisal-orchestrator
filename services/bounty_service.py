@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +13,7 @@ from core.models import (
     SubmissionCreate,
     SubmissionStatus,
     Transaction,
+    TransactionType,
     User,
 )
 from repositories.bounty_repository import BountyRepository, SubmissionRepository
@@ -109,7 +111,7 @@ class BountyService:
 
         # Listing Fee Transaction
         if CreditService.LISTING_FEE > 0:
-            fee_txn = Transaction(from_user_id=owner.id, micro_amount=CreditService.LISTING_FEE, bounty_id=bounty.id, type="fee")
+            fee_txn = Transaction(from_user_id=owner.id, micro_amount=CreditService.LISTING_FEE, bounty_id=bounty.id, type=TransactionType.FEE)
             session.add(fee_txn)
 
         session.commit()
@@ -122,7 +124,6 @@ class BountyService:
         Submits a solution solution. Supports idempotency using solver_id + idempotency_key.
         """
         bounty_repo = BountyRepository(session)
-        sub_repo = SubmissionRepository(session)
 
         # 1. Check for Idempotency
         existing_submission = session.exec(
@@ -154,17 +155,18 @@ class BountyService:
         )
 
         try:
-            submission = sub_repo.create(submission)
-        except IntegrityError as e:
+            session.add(submission)
+            session.flush() # Generate ID and check constraints without committing
+        except IntegrityError:
             session.rollback()
             existing = session.exec(
                 select(Submission).where(Submission.solver_id == solver.id, Submission.idempotency_key == submission_in.idempotency_key)
             ).first()
             if existing:
                 return existing
-            raise HTTPException(status_code=400, detail=f"Database Integrity Error: {str(e)}")
+            raise HTTPException(status_code=400, detail="Submission idempotency conflict or integrity error.")
 
-        # Apply verification fee
+        # Apply verification fee (Always charge for the attempt)
         CreditService.apply_verification_fee(session, solver, bounty_id)
 
         # Validation Logic (Synchronous for v1.0.0 Launch)
@@ -183,17 +185,21 @@ class BountyService:
                 session.add(solver)
 
                 txn = Transaction(
-                    from_user_id=bounty.owner_id, to_user_id=solver.id, micro_amount=bounty.micro_reward, bounty_id=bounty.id, submission_id=submission.id, type="transfer"
+                    from_user_id=bounty.owner_id, 
+                    to_user_id=solver.id, 
+                    micro_amount=bounty.micro_reward, 
+                    bounty_id=bounty.id, 
+                    submission_id=submission.id, 
+                    type=TransactionType.TRANSFER
                 )
                 session.add(txn)
-                bounty_repo.update(bounty)
+                # No need for bounty_repo.update if it's already in session
             else:
                 submission.status = SubmissionStatus.REJECTED
                 submission.stderr = (submission.stderr or "") + "\n[System]: Solution verified but Bounty was already COMPLETED."
         else:
             submission.status = SubmissionStatus.FAILED
 
-        sub_repo.create(submission)  # This effectively updates since it's already in session, but we follow pattern
         session.commit()
         session.refresh(submission)
         return submission
@@ -207,6 +213,9 @@ class BountyService:
 
         if bounty.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
+            
+        if bounty.locked_until and bounty.locked_until > datetime.now(UTC):
+            raise HTTPException(status_code=400, detail="Bounty is currently locked and cannot be cancelled. This guarantees solver agent compute safety.")
 
         submissions = SubmissionRepository(session).get_by_bounty_id(bounty_id)
         if submissions:
@@ -216,7 +225,7 @@ class BountyService:
             user.micro_credits += bounty.micro_reward
             session.add(user)
 
-            txn = Transaction(to_user_id=user.id, micro_amount=bounty.micro_reward, bounty_id=bounty.id, type="refund")
+            txn = Transaction(to_user_id=user.id, micro_amount=bounty.micro_reward, bounty_id=bounty.id, type=TransactionType.REFUND)
             session.add(txn)
 
         bounty.status = BountyStatus.DELETED

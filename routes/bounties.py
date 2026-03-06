@@ -15,7 +15,6 @@ from core.models import (
 )
 from core.security import get_current_user
 from services.bounty_service import BountyService
-from services.credit_service import CreditService
 
 router = APIRouter(prefix="/bounties", tags=["Bounties"])
 
