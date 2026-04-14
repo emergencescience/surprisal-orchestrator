@@ -1,6 +1,9 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
+
+from providers.base import ExecutionResult
 
 # Add the parent directory (api) to sys.path so we can import execution
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -9,7 +12,9 @@ from services.execution import execute_submission_sync
 
 
 class TestExecution(unittest.TestCase):
-    def test_pass(self):
+    @patch("services.execution.DockerExecutionProvider.execute")
+    def test_pass(self, mock_execute):
+        mock_execute.return_value = ExecutionResult(status="accepted", stdout="ok", stderr="")
         solution = "def add(a, b): return a + b"
         test = """
 import unittest
@@ -21,7 +26,9 @@ class TestAdd(unittest.TestCase):
         result = execute_submission_sync(solution, test)
         self.assertEqual(result.status, "accepted")
 
-    def test_fail(self):
+    @patch("services.execution.DockerExecutionProvider.execute")
+    def test_fail(self, mock_execute):
+        mock_execute.return_value = ExecutionResult(status="rejected", stdout="", stderr="AssertionError")
         solution = "def add(a, b): return a - b"
         test = """
 import unittest
@@ -33,7 +40,9 @@ class TestAdd(unittest.TestCase):
         result = execute_submission_sync(solution, test)
         self.assertEqual(result.status, "rejected")
 
-    def test_timeout(self):
+    @patch("services.execution.DockerExecutionProvider.execute")
+    def test_timeout(self, mock_execute):
+        mock_execute.return_value = ExecutionResult(status="rejected", stdout="", stderr="Execution timed out.")
         # We need the solution to actually run.
         # But wait, execute_submission_sync runs 'python -m unittest test_solution.py'.
         # 'test_solution.py' imports 'solution'.
@@ -97,7 +106,9 @@ class TestSyntax(unittest.TestCase):
         self.assertEqual(result.status, "rejected")
         self.assertIn("Evaluation Spec Error: Security Error: Import of 'os' is forbidden", result.stderr)
 
-    def test_pass_js(self):
+    @patch("services.execution.DockerExecutionProvider.execute")
+    def test_pass_js(self, mock_execute):
+        mock_execute.return_value = ExecutionResult(status="accepted", stdout="JS OK", stderr="")
         solution = "function add(a, b) { return a + b; } module.exports = { add };"
         test = """
 const { add } = require('./solution');

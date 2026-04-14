@@ -4,8 +4,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import sqlalchemy as sa
-from sqlmodel import Field, SQLModel
 from pgvector.sqlalchemy import Vector
+from sqlmodel import Field, SQLModel
 
 
 class BountyStatus(StrEnum):

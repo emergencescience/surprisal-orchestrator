@@ -73,11 +73,7 @@ async def github_callback(code: str, session: Session = Depends(get_session)):
         session.refresh(user)
         message = "Account created successfully!"
 
-    return {
-        "api_key": api_key,
-        "username": user.username,
-        "message": message
-    }
+    return {"api_key": api_key, "username": user.username, "message": message}
 
 
 @router.get("/users/me", response_model=UserRead)

@@ -1,10 +1,11 @@
 import uuid
+
 from fastapi import APIRouter, Depends, Request
-from sqlmodel import Session, select
 from sqlalchemy import func
+from sqlmodel import Session, select
 
 from core.database import get_session
-from core.models import TransactionRead, User, UserRead, Submission
+from core.models import Submission, SubmissionStatus, TransactionRead, User, UserRead
 from core.security import get_current_user
 from services.credit_service import CreditService
 
@@ -32,8 +33,8 @@ def get_reputation(user_id: uuid.UUID, session: Session = Depends(get_session)):
     total = session.exec(select(func.count(Submission.id)).where(Submission.solver_id == user_id)).one()
     if total == 0:
         return {"user_id": user_id, "score": 0.0, "total_submissions": 0, "successful_submissions": 0}
-        
-    successful = session.exec(select(func.count(Submission.id)).where(Submission.solver_id == user_id, Submission.status == "accepted")).one()
+
+    successful = session.exec(select(func.count(Submission.id)).where(Submission.solver_id == user_id, Submission.status == SubmissionStatus.ACCEPTED)).one()
     score = successful / total
     return {"user_id": user_id, "score": score, "total_submissions": total, "successful_submissions": successful}
 

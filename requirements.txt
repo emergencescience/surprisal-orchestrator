@@ -11,7 +11,3 @@ httpx
 greenlet
 slowapi
 pytest
-pandas
-numpy
-sympy
-matplotlib

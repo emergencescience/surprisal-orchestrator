@@ -13,7 +13,7 @@ class DockerExecutionProvider(ExecutionProvider):
 
         try:
             subprocess.run(["docker", "info"], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.CalledProcessError, FileNotFoundError:
             return ExecutionResult(status="failed", stderr="[SYSTEM]: Sandbox Runtime Unavailable (Docker missing).")
 
         with tempfile.TemporaryDirectory() as tmpdir:

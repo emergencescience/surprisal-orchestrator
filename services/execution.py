@@ -9,9 +9,10 @@ from services.safety import validate_code_safety
 class NodeCoordinator:
     """
     Central registry for pluggable and scalable verification nodes.
-    Future versions will query a database of registered nodes to route compute 
+    Future versions will query a database of registered nodes to route compute
     based on the lowest latency, cost, or node reputation.
     """
+
     @classmethod
     def get_provider_for_language(cls, language: str):
         if language == "javascript":

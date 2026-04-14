@@ -12,7 +12,8 @@ def export_openapi():
     openapi_schema = app.openapi()
 
     # Path to save the schema in the centralized protocol directory (Project Root)
-    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "docs", "protocol", "openapi.json")
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    output_path = os.path.join(root_dir, "docs", "protocol", "openapi.json")
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 

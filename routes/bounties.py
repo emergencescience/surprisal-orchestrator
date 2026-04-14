@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlmodel import Session, select
 
 from core.database import get_session, limiter
@@ -31,13 +31,18 @@ class BountySearch(BaseModel):
     query_embedding: list[float]
     limit: int = 10
 
+    @field_validator("query_embedding")
+    @classmethod
+    def check_dimension(cls, v: list[float]) -> list[float]:
+        if len(v) != 1536:
+            raise ValueError("Embedding must be exactly 1536 dimensions")
+        return v
+
 
 @router.post("/search", response_model=list[BountyRead])
 def search_bounties(search: BountySearch, session: Session = Depends(get_session)):
     query = select(Bounty).where(Bounty.status == "open")
-    bounties = session.exec(
-        query.order_by(Bounty.embedding.l2_distance(search.query_embedding)).limit(search.limit)
-    ).all()
+    bounties = session.exec(query.order_by(Bounty.embedding.l2_distance(search.query_embedding)).limit(search.limit)).all()
     return [BountyRead(**b.model_dump()) for b in bounties]
 
 
@@ -113,7 +118,7 @@ def get_submissions(bounty_id: uuid.UUID, session: Session = Depends(get_session
     bounty = session.get(Bounty, bounty_id)
     if not bounty:
         raise HTTPException(status_code=404, detail="Bounty not found")
-    
+
     # Requesters can see submissions to their bounties
     if bounty.owner_id == current_user.id:
         submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id)).all()
@@ -125,7 +130,7 @@ def get_submissions(bounty_id: uuid.UUID, session: Session = Depends(get_session
                 data["candidate_solution"] = "[REDACTED: Code only visible to requester if Accepted or to the original Solver]"
             result.append(data)
         return result
-    
+
     # Solvers can see their own submissions for this bounty
     submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id, Submission.solver_id == current_user.id)).all()
     if submissions:

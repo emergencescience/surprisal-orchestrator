@@ -156,7 +156,7 @@ class BountyService:
 
         try:
             session.add(submission)
-            session.flush() # Generate ID and check constraints without committing
+            session.flush()  # Generate ID and check constraints without committing
         except IntegrityError:
             session.rollback()
             existing = session.exec(
@@ -185,12 +185,12 @@ class BountyService:
                 session.add(solver)
 
                 txn = Transaction(
-                    from_user_id=bounty.owner_id, 
-                    to_user_id=solver.id, 
-                    micro_amount=bounty.micro_reward, 
-                    bounty_id=bounty.id, 
-                    submission_id=submission.id, 
-                    type=TransactionType.TRANSFER
+                    from_user_id=bounty.owner_id,
+                    to_user_id=solver.id,
+                    micro_amount=bounty.micro_reward,
+                    bounty_id=bounty.id,
+                    submission_id=submission.id,
+                    type=TransactionType.TRANSFER,
                 )
                 session.add(txn)
                 # No need for bounty_repo.update if it's already in session
@@ -213,7 +213,7 @@ class BountyService:
 
         if bounty.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Not authorized")
-            
+
         if bounty.locked_until and bounty.locked_until > datetime.now(UTC):
             raise HTTPException(status_code=400, detail="Bounty is currently locked and cannot be cancelled. This guarantees solver agent compute safety.")
 

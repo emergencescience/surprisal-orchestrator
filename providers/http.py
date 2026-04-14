@@ -11,16 +11,9 @@ class HttpExecutionProvider(ExecutionProvider):
         try:
             with httpx.Client(timeout=10.0) as client:
                 resp = client.post(
-                    f"{self.base_url}/execute",
-                    json={"solution": solution, "test": spec, "language": language},
-                    headers={"Content-Type": "application/json"}
+                    f"{self.base_url}/execute", json={"solution": solution, "test": spec, "language": language}, headers={"Content-Type": "application/json"}
                 )
                 data = resp.json()
-                return ExecutionResult(
-                    status=data.get("status", "failed"),
-                    stdout=data.get("stdout"),
-                    stderr=data.get("stderr"),
-                    error=data.get("error")
-                )
+                return ExecutionResult(status=data.get("status", "failed"), stdout=data.get("stdout"), stderr=data.get("stderr"), error=data.get("error"))
         except Exception as e:
             return ExecutionResult(status="failed", stderr=f"[SYSTEM]: Failed to connect to Sandbox Service: {str(e)}")

@@ -17,6 +17,7 @@ def create_db_and_tables():
     SQLModel.metadata.create_all(engine)
     print("Database schema ensured.")
 
+
 def get_session():
     with Session(engine) as session:
         yield session
