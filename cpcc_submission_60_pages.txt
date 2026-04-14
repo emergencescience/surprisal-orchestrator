@@ -1,0 +1,1323 @@
+
+
+/* ========================================================================= 
+   FILE: models.py
+   ========================================================================= */
+
+import os
+import uuid
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
+
+import sqlalchemy as sa
+from sqlmodel import Field, SQLModel
+from pgvector.sqlalchemy import Vector
+
+
+class BountyStatus(StrEnum):
+    OPEN = "open"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+    DELETED = "deleted"
+
+
+class SubmissionStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    VERIFIED = "verified"
+    FAILED = "failed"
+    ERROR = "error"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class TransactionType(StrEnum):
+    TRANSFER = "transfer"
+    FEE = "fee"
+    REFUND = "refund"
+    GRANT = "grant"
+
+
+class ProgrammingLanguage(StrEnum):
+    PYTHON3 = "python3"
+    RUST = "rust"
+    GOLANG = "golang"
+    JAVASCRIPT = "javascript"
+    TYPESCRIPT = "typescript"
+    TEXT = "text"  # For non-code bounties (manual review)
+
+
+class UserBase(SQLModel):
+    username: str = Field(unique=True)
+
+
+class User(UserBase, table=True):
+    __table_args__ = (sa.UniqueConstraint("provider", "provider_id", name="unique_user_provider"), {"extend_existing": True})
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    api_key: str = Field(index=True, unique=True)
+    provider: str = Field(default="github", index=True)
+    provider_id: str = Field(index=True)
+    micro_credits: int = Field(
+        default_factory=lambda: int(os.getenv("INITIAL_GRANT_MICRO_CREDITS", "1000000")),
+        sa_column=sa.Column(sa.BigInteger, default=lambda: int(os.getenv("INITIAL_GRANT_MICRO_CREDITS", "1000000"))),
+    )
+    updated_at: datetime | None = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
+    )
+    deleted_at: datetime | None = Field(default=None, sa_column=sa.Column(sa.DateTime(timezone=True)))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+    )
+
+
+class UserRead(SQLModel):
+    id: uuid.UUID
+    username: str
+    micro_credits: int
+    created_at: datetime
+
+
+class Transaction(SQLModel, table=True):
+    __table_args__ = (sa.CheckConstraint("micro_amount > 0", name="check_amount_positive"), {"extend_existing": True})
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    from_user_id: uuid.UUID | None = Field(default=None, foreign_key="user.id", index=True)
+    to_user_id: uuid.UUID | None = Field(default=None, foreign_key="user.id", index=True)
+    micro_amount: int = Field(sa_column=sa.Column(sa.BigInteger))
+    bounty_id: uuid.UUID | None = Field(default=None, foreign_key="bounty.id", index=True)
+    submission_id: uuid.UUID | None = Field(default=None, foreign_key="submission.id", index=True)
+    type: TransactionType = Field(default=TransactionType.TRANSFER, sa_column=sa.Column(sa.String, default=TransactionType.TRANSFER))
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+    )
+
+
+class TransactionRead(SQLModel):
+    id: uuid.UUID
+    from_user_id: uuid.UUID | None
+    to_user_id: uuid.UUID | None
+    micro_amount: int  # High-precision unit (1,000,000 = 1 Credit)
+    bounty_id: uuid.UUID | None
+    submission_id: uuid.UUID | None
+    type: TransactionType
+    created_at: datetime
+
+
+class BountyBase(SQLModel):
+    title: str
+    description: str
+    programming_language: ProgrammingLanguage = Field(default=ProgrammingLanguage.PYTHON3, sa_column=sa.Column(sa.String))
+    runtime: str | None = Field(default="python:3.14", description="Specific runtime version (e.g., 'python:3.14', 'node:20')")
+    locked_until: datetime | None = Field(
+        default=None,
+        description="Timestamp until which the requester cannot cancel the bounty, giving solvers guaranteed time to work.",
+        sa_column=sa.Column(sa.DateTime(timezone=True)),
+    )
+    bounty_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
+
+
+class Bounty(BountyBase, table=True):
+    __table_args__ = (
+        sa.CheckConstraint("micro_reward > 0", name="check_reward_positive"),
+        sa.UniqueConstraint("owner_id", "idempotency_key", name="unique_bounty_idempotency"),
+        {"extend_existing": True},
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    micro_reward: int = Field(sa_column=sa.Column(sa.BigInteger))
+    solution_template: str | None = None
+    evaluation_spec: str | None = None
+    runtime: str | None = Field(default="python:3.14")
+    bounty_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
+    embedding: list[float] | None = Field(default=None, sa_column=sa.Column(Vector(1536)))
+    status: BountyStatus = Field(default=BountyStatus.OPEN, sa_column=sa.Column(sa.String, default=BountyStatus.OPEN))
+    owner_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    idempotency_key: uuid.UUID = Field(index=True)
+    accepted_submission_id: uuid.UUID | None = Field(
+        default=None, sa_column=sa.Column(sa.UUID, sa.ForeignKey("submission.id", use_alter=True, name="fk_bounty_accepted_submission"))
+    )
+    deleted_at: datetime | None = Field(default=None, sa_column=sa.Column(sa.DateTime(timezone=True)))
+    updated_at: datetime | None = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+    )
+    expires_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC) + timedelta(days=7),
+        sa_column=sa.Column(sa.DateTime(timezone=True)),
+    )
+
+
+class BountyCreate(BountyBase):
+    micro_reward: int = Field(description="Reward in micro-credits (1,000,000 = 1 Credit)")
+    solution_template: str | None = None
+    evaluation_spec: str | None = None
+    idempotency_key: uuid.UUID
+
+
+class BountyRead(BountyBase):
+    id: uuid.UUID
+    micro_reward: int  # Micro-credits (e.g. 1,000,000)
+    status: BountyStatus
+    created_at: datetime
+    expires_at: datetime | None = None
+
+
+class BountyDetailRead(BountyRead):
+    solution_template: str | None = None
+    evaluation_spec: str | None = None
+
+
+class SubmissionBase(SQLModel):
+    candidate_solution: str
+    commentary: str | None = None  # Markdown commentary from seller
+    submission_metadata: dict = Field(default_factory=dict)
+
+
+class Submission(SubmissionBase, table=True):
+    __table_args__ = (sa.UniqueConstraint("solver_id", "idempotency_key", name="unique_submission_idempotency"), {"extend_existing": True})
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    bounty_id: uuid.UUID = Field(sa_column=sa.Column(sa.UUID, sa.ForeignKey("bounty.id", name="fk_submission_bounty"), nullable=False, index=True))
+    solver_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    idempotency_key: uuid.UUID = Field(index=True)
+    submission_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
+    status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, sa_column=sa.Column(sa.String, default=SubmissionStatus.PENDING))
+    stdout: str | None = None
+    stderr: str | None = None
+    deleted_at: datetime | None = Field(default=None, sa_column=sa.Column(sa.DateTime(timezone=True)))
+    updated_at: datetime | None = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), onupdate=sa.func.now()),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=sa.Column(sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+    )
+
+
+class SubmissionCreate(SubmissionBase):
+    idempotency_key: uuid.UUID
+
+
+/* ========================================================================= 
+   FILE: bounty_service.py
+   ========================================================================= */
+
+import uuid
+from datetime import UTC, datetime
+
+from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session, select
+
+from core.models import (
+    Bounty,
+    BountyCreate,
+    BountyStatus,
+    Submission,
+    SubmissionCreate,
+    SubmissionStatus,
+    Transaction,
+    TransactionType,
+    User,
+)
+from repositories.bounty_repository import BountyRepository, SubmissionRepository
+from services.credit_service import CreditService
+from services.execution import execute_submission_sync
+from services.safety import validate_code_safety
+
+
+class BountyService:
+    @staticmethod
+    def create_bounty(session: Session, bounty_in: BountyCreate, owner: User) -> Bounty:
+        """
+        Creates a new bounty, handles credit escrow and listing fees.
+        Enforces a mandatory dry-run validation before creation.
+        """
+        repo = BountyRepository(session)
+
+        # 1. Check for Idempotency
+        existing_bounty = session.exec(select(Bounty).where(Bounty.owner_id == owner.id, Bounty.idempotency_key == bounty_in.idempotency_key)).first()
+        if existing_bounty:
+            return existing_bounty
+
+        # reward_micro is already in micro-credits
+        reward_micro = bounty_in.micro_reward
+
+        # Validations
+        if reward_micro <= 0:
+            raise HTTPException(status_code=400, detail="Reward must be a positive number (in micro-credits).")
+
+        if reward_micro > CreditService.SCALE:  # 1,000,000 micro-credits = 1 Credit ($1)
+            raise HTTPException(
+                status_code=400, detail=f"Reward limit exceeded for v1.0.0. Maximum reward is 1.0 Credit ({CreditService.SCALE} micro-credits)."
+            )
+
+        if not bounty_in.evaluation_spec:
+            raise HTTPException(status_code=400, detail="evaluation_spec is required.")
+
+        # 2. Syntax, Safety & Mandatory Dry-Run
+        language = bounty_in.programming_language or "python3"
+        try:
+            # Static Safety Check
+            test_safety_err = validate_code_safety(bounty_in.evaluation_spec, language)
+            if test_safety_err:
+                raise HTTPException(status_code=400, detail=f"Bounty Evaluation Spec Safety Error: {test_safety_err}")
+
+            if bounty_in.solution_template:
+                template_safety_err = validate_code_safety(bounty_in.solution_template, language)
+                if template_safety_err:
+                    raise HTTPException(status_code=400, detail=f"Bounty Solution Template Safety Error: {template_safety_err}")
+
+            # Mandatory Dry-Run
+            dry_run_solution = bounty_in.solution_template or ("pass" if language == "python3" else "// pass")
+            dry_run_result = execute_submission_sync(dry_run_solution, bounty_in.evaluation_spec, language)
+
+            if dry_run_result.status == "rejected" and "Security Error" in (dry_run_result.stderr or ""):
+                raise HTTPException(status_code=400, detail=f"Bounty Dry-Run Security Violation: {dry_run_result.stderr}")
+
+        except SyntaxError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid Python syntax: {str(e)}")
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(status_code=400, detail=f"Bounty Validation Error: {str(e)}")
+
+        # 3. Credit Check ($1 USD Shield + Reward)
+        total_cost = reward_micro + CreditService.LISTING_FEE
+        if owner.micro_credits < total_cost:
+            raise HTTPException(
+                status_code=402, detail=f"Insufficient credits. Total cost (Reward + Listing Fee) is {CreditService.from_micro(total_cost)} credits."
+            )
+
+        # Deduct credits
+        owner.micro_credits -= total_cost
+        session.add(owner)
+
+        # Create Bounty object
+        bounty = Bounty(
+            title=bounty_in.title,
+            description=bounty_in.description,
+            micro_reward=reward_micro,
+            solution_template=bounty_in.solution_template,
+            evaluation_spec=bounty_in.evaluation_spec,
+            owner_id=owner.id,
+            idempotency_key=bounty_in.idempotency_key,
+            programming_language=bounty_in.programming_language,
+            runtime=bounty_in.runtime,
+            bounty_metadata=bounty_in.bounty_metadata,
+        )
+
+        try:
+            bounty = repo.create(bounty)
+        except IntegrityError:
+            session.rollback()
+            return session.exec(select(Bounty).where(Bounty.owner_id == owner.id, Bounty.idempotency_key == bounty_in.idempotency_key)).one()
+
+        # Listing Fee Transaction
+        if CreditService.LISTING_FEE > 0:
+            fee_txn = Transaction(from_user_id=owner.id, micro_amount=CreditService.LISTING_FEE, bounty_id=bounty.id, type=TransactionType.FEE)
+            session.add(fee_txn)
+
+        session.commit()
+        session.refresh(bounty)
+        return bounty
+
+    @staticmethod
+    def create_submission(session: Session, bounty_id: uuid.UUID, solver: User, submission_in: SubmissionCreate) -> Submission:
+        """
+        Submits a solution solution. Supports idempotency using solver_id + idempotency_key.
+        """
+        bounty_repo = BountyRepository(session)
+
+        # 1. Check for Idempotency
+        existing_submission = session.exec(
+            select(Submission).where(Submission.solver_id == solver.id, Submission.idempotency_key == submission_in.idempotency_key)
+        ).first()
+        if existing_submission:
+            return existing_submission
+
+        # Verify bounty
+        bounty = bounty_repo.get_by_id(bounty_id)
+        if not bounty:
+            raise HTTPException(status_code=404, detail="Bounty not found")
+        if bounty.status != BountyStatus.OPEN:
+            raise HTTPException(status_code=400, detail="Bounty is not open")
+
+        # Prevent self-solving
+        if bounty.owner_id == solver.id:
+            raise HTTPException(status_code=400, detail="Cannot solve your own bounty")
+
+        # Create Submission Record
+        submission = Submission(
+            bounty_id=bounty_id,
+            solver_id=solver.id,
+            candidate_solution=submission_in.candidate_solution,
+            commentary=submission_in.commentary,
+            idempotency_key=submission_in.idempotency_key,
+            submission_metadata=submission_in.submission_metadata,
+            status=SubmissionStatus.PENDING,
+        )
+
+        try:
+            session.add(submission)
+            session.flush() # Generate ID and check constraints without committing
+        except IntegrityError:
+            session.rollback()
+            existing = session.exec(
+                select(Submission).where(Submission.solver_id == solver.id, Submission.idempotency_key == submission_in.idempotency_key)
+            ).first()
+            if existing:
+                return existing
+            raise HTTPException(status_code=400, detail="Submission idempotency conflict or integrity error.")
+
+        # Apply verification fee (Always charge for the attempt)
+        CreditService.apply_verification_fee(session, solver, bounty_id)
+
+        # Validation Logic (Synchronous for v1.0.0 Launch)
+        result = execute_submission_sync(submission.candidate_solution, bounty.evaluation_spec, bounty.programming_language)
+        submission.stdout = result.stdout
+        submission.stderr = result.stderr
+
+        if result.status == "accepted":
+            session.refresh(bounty)
+            if bounty.status == BountyStatus.OPEN:
+                submission.status = SubmissionStatus.ACCEPTED
+                bounty.status = BountyStatus.COMPLETED
+                bounty.accepted_submission_id = submission.id
+
+                solver.micro_credits += bounty.micro_reward
+                session.add(solver)
+
+                txn = Transaction(
+                    from_user_id=bounty.owner_id, 
+                    to_user_id=solver.id, 
+                    micro_amount=bounty.micro_reward, 
+                    bounty_id=bounty.id, 
+                    submission_id=submission.id, 
+                    type=TransactionType.TRANSFER
+                )
+                session.add(txn)
+                # No need for bounty_repo.update if it's already in session
+            else:
+                submission.status = SubmissionStatus.REJECTED
+                submission.stderr = (submission.stderr or "") + "\n[System]: Solution verified but Bounty was already COMPLETED."
+        else:
+            submission.status = SubmissionStatus.FAILED
+
+        session.commit()
+        session.refresh(submission)
+        return submission
+
+    @staticmethod
+    def delete_bounty(session: Session, bounty_id: uuid.UUID, user: User):
+        repo = BountyRepository(session)
+        bounty = repo.get_by_id(bounty_id)
+        if not bounty:
+            raise HTTPException(status_code=404, detail="Bounty not found")
+
+        if bounty.owner_id != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+            
+        if bounty.locked_until and bounty.locked_until > datetime.now(UTC):
+            raise HTTPException(status_code=400, detail="Bounty is currently locked and cannot be cancelled. This guarantees solver agent compute safety.")
+
+        submissions = SubmissionRepository(session).get_by_bounty_id(bounty_id)
+        if submissions:
+            raise HTTPException(status_code=409, detail="Cannot delete bounty with existing submissions.")
+
+        if bounty.status != BountyStatus.DELETED and bounty.micro_reward > 0:
+            user.micro_credits += bounty.micro_reward
+            session.add(user)
+
+            txn = Transaction(to_user_id=user.id, micro_amount=bounty.micro_reward, bounty_id=bounty.id, type=TransactionType.REFUND)
+            session.add(txn)
+
+        bounty.status = BountyStatus.DELETED
+        repo.update(bounty)
+        session.commit()
+
+
+/* ========================================================================= 
+   FILE: execution.py
+   ========================================================================= */
+
+import os
+
+from providers.base import ExecutionResult
+from providers.docker import DockerExecutionProvider
+from providers.http import HttpExecutionProvider
+from services.safety import validate_code_safety
+
+
+class NodeCoordinator:
+    """
+    Central registry for pluggable and scalable verification nodes.
+    Future versions will query a database of registered nodes to route compute 
+    based on the lowest latency, cost, or node reputation.
+    """
+    @classmethod
+    def get_provider_for_language(cls, language: str):
+        if language == "javascript":
+            js_url = os.getenv("JS_SANDBOX_URL")
+            if js_url:
+                return HttpExecutionProvider(js_url)
+
+        if language == "python3":
+            py_url = os.getenv("PYTHON_SANDBOX_URL")
+            if py_url:
+                return HttpExecutionProvider(py_url)
+
+        # Default to Docker (Local/Dev)
+        return DockerExecutionProvider()
+
+
+def execute_submission_sync(solution_code: str, evaluation_spec: str, language: str = "python3") -> ExecutionResult:
+    """
+    Dispatcher for code execution. Validates safety and routes to the Verification Network.
+    """
+    # 0. Safety Checks
+    for code, label in [(solution_code, ""), (evaluation_spec, "Evaluation Spec Error: ")]:
+        err = validate_code_safety(code, language)
+        if err:
+            return ExecutionResult(status="rejected", stderr=f"{label}{err}")
+
+    # 1. Provider Routing via Coordinator
+    provider = NodeCoordinator.get_provider_for_language(language)
+    return provider.execute(solution_code, evaluation_spec, language)
+
+
+/* ========================================================================= 
+   FILE: bounties.py
+   ========================================================================= */
+
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
+from sqlmodel import Session, select
+
+from core.database import get_session, limiter
+from core.models import (
+    Bounty,
+    BountyCreate,
+    BountyDetailRead,
+    BountyRead,
+    Submission,
+    SubmissionCreate,
+    User,
+)
+from core.security import get_current_user
+from services.bounty_service import BountyService
+
+router = APIRouter(prefix="/bounties", tags=["Bounties"])
+
+
+def user_id_rate_limit(request: Request):
+    user = getattr(request.state, "user", None)
+    if user:
+        return str(user.id)
+    return "anonymous"
+
+
+class BountySearch(BaseModel):
+    query_embedding: list[float]
+    limit: int = 10
+
+
+@router.post("/search", response_model=list[BountyRead])
+def search_bounties(search: BountySearch, session: Session = Depends(get_session)):
+    query = select(Bounty).where(Bounty.status == "open")
+    bounties = session.exec(
+        query.order_by(Bounty.embedding.l2_distance(search.query_embedding)).limit(search.limit)
+    ).all()
+    return [BountyRead(**b.model_dump()) for b in bounties]
+
+
+@router.post("", response_model=BountyRead)
+@limiter.limit("1/minute", key_func=user_id_rate_limit)
+def create_bounty(request: Request, bounty: BountyCreate, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    bounty_obj = BountyService.create_bounty(session, bounty, current_user)
+    return BountyRead.model_validate(bounty_obj)
+
+
+@router.get("", response_model=list[BountyRead])
+def get_bounties(
+    skip: int = 0,
+    limit: int = 10,
+    status: str | None = Query(None, description="Comma-separated list of statuses to filter by (e.g. 'open,completed'). Defaults to 'open'."),
+    session: Session = Depends(get_session),
+):
+    query = select(Bounty)
+
+    if status:
+        status_list = [s.strip() for s in status.split(",")]
+        query = query.where(Bounty.status.in_(status_list))
+    else:
+        query = query.where(Bounty.status == "open")
+
+    bounties = session.exec(query.order_by(Bounty.created_at.desc()).offset(skip).limit(limit)).all()
+
+    return [BountyRead(**b.model_dump()) for b in bounties]
+
+
+@router.get("/{bounty_id}", response_model=BountyDetailRead)
+def get_bounty(bounty_id: uuid.UUID, session: Session = Depends(get_session)):
+    bounty = session.get(Bounty, bounty_id)
+    if not bounty:
+        raise HTTPException(status_code=404, detail="Bounty not found")
+    return BountyDetailRead(**bounty.model_dump())
+
+
+@router.get("/{bounty_id}/solution")
+def get_bounty_solution(bounty_id: uuid.UUID, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """Note: Original code had two versions of this. Merging to the one that requires ownership or completion."""
+    bounty = session.get(Bounty, bounty_id)
+    if not bounty:
+        raise HTTPException(status_code=404, detail="Bounty not found")
+
+    if bounty.status != "completed":
+        raise HTTPException(status_code=403, detail="Solution only available for completed bounties.")
+
+    if bounty.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the bounty owner can view the solution.")
+
+    statement = select(Submission).where(Submission.bounty_id == bounty_id, Submission.status == "accepted")
+    submission = session.exec(statement).first()
+    if not submission:
+        raise HTTPException(status_code=404, detail="Accepted solution not found.")
+
+    return {"candidate_solution": submission.candidate_solution}
+
+
+@router.post("/{bounty_id}/submissions", response_model=Submission)
+def create_submission(
+    request: Request,
+    bounty_id: uuid.UUID,
+    submission_in: SubmissionCreate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    return BountyService.create_submission(session, bounty_id, current_user, submission_in)
+
+
+@router.get("/{bounty_id}/submissions", response_model=list[dict])
+def get_submissions(bounty_id: uuid.UUID, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    bounty = session.get(Bounty, bounty_id)
+    if not bounty:
+        raise HTTPException(status_code=404, detail="Bounty not found")
+    
+    # Requesters can see submissions to their bounties
+    if bounty.owner_id == current_user.id:
+        submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id)).all()
+        result = []
+        for s in submissions:
+            data = s.model_dump()
+            # Redact code if not accepted and requester is not the solver
+            if s.status != "accepted" and s.solver_id != current_user.id:
+                data["candidate_solution"] = "[REDACTED: Code only visible to requester if Accepted or to the original Solver]"
+            result.append(data)
+        return result
+    
+    # Solvers can see their own submissions for this bounty
+    submissions = session.exec(select(Submission).where(Submission.bounty_id == bounty_id, Submission.solver_id == current_user.id)).all()
+    if submissions:
+        return [s.model_dump() for s in submissions]
+
+    raise HTTPException(status_code=403, detail="Not authorized to view these submissions.")
+
+
+@router.get("/submissions/me", response_model=list[Submission])
+def get_my_submissions(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """
+    Returns all submissions made by the current user.
+    """
+    submissions = session.exec(select(Submission).where(Submission.solver_id == current_user.id)).all()
+    return submissions
+
+
+@router.delete("/{bounty_id}", status_code=204)
+def delete_bounty(bounty_id: uuid.UUID, session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    BountyService.delete_bounty(session, bounty_id, current_user)
+    return None
+
+
+@router.post("/batch", response_model=list[BountyRead])
+def get_bounties_batch(request: Request, bounty_ids: list[uuid.UUID], session: Session = Depends(get_session)):
+    statement = select(Bounty).where(Bounty.id.in_(bounty_ids))
+    bounties = session.exec(statement).all()
+    return [BountyRead(**b.model_dump()) for b in bounties]
+
+
+/* ========================================================================= 
+   FILE: database.py
+   ========================================================================= */
+
+import os
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from sqlmodel import Session, SQLModel, create_engine
+
+# Default to Docker service name 'db', fallback to localhost for local dev
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:password@localhost:5432/surprisal_db")
+
+# Rate Limiter Setup
+limiter = Limiter(key_func=get_remote_address, storage_uri="memory://")
+
+engine = create_engine(DATABASE_URL)
+
+
+def create_db_and_tables():
+    SQLModel.metadata.create_all(engine)
+    print("Database schema ensured.")
+
+def get_session():
+    with Session(engine) as session:
+        yield session
+
+
+/* ========================================================================= 
+   FILE: security.py
+   ========================================================================= */
+
+import os
+
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlmodel import Session, select
+
+from core.database import get_session
+from core.models import User
+
+security = HTTPBearer()
+
+ADMIN_SECRET = os.getenv("ADMIN_SECRET", "super-secret-admin-key")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "your_github_client_id")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "your_github_client_secret")
+
+
+def get_current_user(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security), session: Session = Depends(get_session)) -> User:
+    token = credentials.credentials
+    user = session.exec(select(User).where(User.api_key == token)).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API Key",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if user.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="User deleted")
+
+    # Attach to request.state for rate limiting and other middleware
+    request.state.user = user
+    return user
+
+
+/* ========================================================================= 
+   FILE: __init__.py
+   ========================================================================= */
+
+
+
+/* ========================================================================= 
+   FILE: docker.py
+   ========================================================================= */
+
+import os
+import subprocess
+import tempfile
+import uuid
+
+from .base import ExecutionProvider, ExecutionResult
+
+
+class DockerExecutionProvider(ExecutionProvider):
+    def execute(self, solution: str, spec: str, language: str) -> ExecutionResult:
+        if os.getenv("SKIP_SANDBOX") == "true":
+            return ExecutionResult(status="failed", stderr="[SYSTEM]: Sandbox execution is disabled (SKIP_SANDBOX=true).")
+
+        try:
+            subprocess.run(["docker", "info"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return ExecutionResult(status="failed", stderr="[SYSTEM]: Sandbox Runtime Unavailable (Docker missing).")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            if language == "python3":
+                sol_file, spec_file = "solution.py", "evaluation_spec.py"
+                cmd = ["python3", "-m", "unittest", "evaluation_spec"]
+            elif language == "javascript":
+                sol_file, spec_file = "solution.js", "evaluation_spec.js"
+                cmd = ["node", spec_file]
+            else:
+                return ExecutionResult(status="rejected", error=f"Language {language} not supported.")
+
+            with open(os.path.join(tmpdir, sol_file), "w") as f:
+                f.write(solution)
+            with open(os.path.join(tmpdir, spec_file), "w") as f:
+                f.write(spec)
+
+            container_name = f"surprisal-sandbox-{uuid.uuid4().hex[:8]}"
+            docker_cmd = [
+                "docker",
+                "run",
+                "--rm",
+                "--name",
+                container_name,
+                "--network",
+                "none",
+                "--memory",
+                "512m",
+                "--cpus",
+                "1.0",
+                "-v",
+                f"{tmpdir}:/home/sandbox:ro",
+                "surprisal-sandbox",
+                *cmd,
+            ]
+
+            try:
+                result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=12)
+                return ExecutionResult(status="accepted" if result.returncode == 0 else "rejected", stdout=result.stdout, stderr=result.stderr)
+            except subprocess.TimeoutExpired:
+                subprocess.run(["docker", "kill", container_name], capture_output=True)
+                return ExecutionResult(status="rejected", stderr="Execution timed out.")
+            except Exception as e:
+                return ExecutionResult(status="rejected", stderr=str(e), error=str(e))
+            finally:
+                subprocess.run(["docker", "rm", "-f", container_name], capture_output=True)
+
+
+/* ========================================================================= 
+   FILE: http.py
+   ========================================================================= */
+
+from .base import ExecutionProvider, ExecutionResult
+
+
+class HttpExecutionProvider(ExecutionProvider):
+    def __init__(self, base_url: str):
+        self.base_url = base_url
+
+    def execute(self, solution: str, spec: str, language: str) -> ExecutionResult:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post(
+                    f"{self.base_url}/execute",
+                    json={"solution": solution, "test": spec, "language": language},
+                    headers={"Content-Type": "application/json"}
+                )
+                data = resp.json()
+                return ExecutionResult(
+                    status=data.get("status", "failed"),
+                    stdout=data.get("stdout"),
+                    stderr=data.get("stderr"),
+                    error=data.get("error")
+                )
+        except Exception as e:
+            return ExecutionResult(status="failed", stderr=f"[SYSTEM]: Failed to connect to Sandbox Service: {str(e)}")
+
+
+/* ========================================================================= 
+   FILE: base.py
+   ========================================================================= */
+
+from abc import ABC, abstractmethod
+
+from pydantic import BaseModel
+
+
+class ExecutionResult(BaseModel):
+    status: str  # "accepted", "rejected", "failed"
+    stdout: str | None = None
+    stderr: str | None = None
+    error: str | None = None
+
+
+class ExecutionProvider(ABC):
+    @abstractmethod
+    def execute(self, solution: str, spec: str, language: str) -> ExecutionResult:
+        pass
+
+
+/* ========================================================================= 
+   FILE: __init__.py
+   ========================================================================= */
+
+
+
+/* ========================================================================= 
+   FILE: __init__.py
+   ========================================================================= */
+
+
+
+/* ========================================================================= 
+   FILE: bounty_repository.py
+   ========================================================================= */
+
+import uuid
+
+from sqlmodel import Session, select
+
+from core.models import Bounty, BountyStatus, Submission
+
+
+class BountyRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def get_by_id(self, bounty_id: uuid.UUID) -> Bounty | None:
+        return self.session.get(Bounty, bounty_id)
+
+    def get_active(self) -> list[Bounty]:
+        statement = select(Bounty).where(Bounty.status == BountyStatus.OPEN)
+        return self.session.exec(statement).all()
+
+    def create(self, bounty: Bounty) -> Bounty:
+        self.session.add(bounty)
+        self.session.commit()
+        self.session.refresh(bounty)
+        return bounty
+
+    def update(self, bounty: Bounty) -> Bounty:
+        self.session.add(bounty)
+        self.session.commit()
+        self.session.refresh(bounty)
+        return bounty
+
+
+class SubmissionRepository:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def create(self, submission: Submission) -> Submission:
+        self.session.add(submission)
+        self.session.commit()
+        self.session.refresh(submission)
+        return submission
+
+    def get_by_bounty_id(self, bounty_id: uuid.UUID) -> list[Submission]:
+        statement = select(Submission).where(Submission.bounty_id == bounty_id)
+        return self.session.exec(statement).all()
+
+
+/* ========================================================================= 
+   FILE: export_openapi.py
+   ========================================================================= */
+
+import json
+import os
+import sys
+
+# Add the parent directory to sys.path so we can import main
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from main import app
+
+
+def export_openapi():
+    openapi_schema = app.openapi()
+
+    # Path to save the schema in the centralized protocol directory (Project Root)
+    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "docs", "protocol", "openapi.json")
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    with open(output_path, "w") as f:
+        json.dump(openapi_schema, f, indent=2)
+
+    print(f"OpenAPI schema exported to {output_path}")
+
+
+if __name__ == "__main__":
+    export_openapi()
+
+
+/* ========================================================================= 
+   FILE: main.py
+   ========================================================================= */
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+from core.database import create_db_and_tables, limiter
+from routes import accounts, auth, bounties
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+    yield
+
+
+app = FastAPI(
+    title="Surprisal Orchestrator", description="The Open-Source Reference Implementation for the Surprisal Protocol.", version="1.0.0", lifespan=lifespan
+)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# CORS
+origins = [
+    "http://localhost:3000",
+    "https://emergence.science",
+    "https://www.emergence.science",
+    "https://surprisal-portal.vercel.app",
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include Routers
+app.include_router(auth.router)
+app.include_router(bounties.router)
+app.include_router(accounts.router)
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+/* ========================================================================= 
+   FILE: auth.py
+   ========================================================================= */
+
+import os
+import secrets
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import RedirectResponse
+from sqlmodel import Session, select
+
+from core.database import get_session
+from core.models import User, UserRead
+from core.security import GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, get_current_user
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "https://www.emergence.science")
+
+router = APIRouter(tags=["Authentication"])
+
+# Programmatic registration disabled for v1.0.0 due to missing verification logic.
+# Use GitHub OAuth for onboarding.
+
+
+@router.get("/auth/github/login")
+def github_login():
+    # Construct redirect URL for GitHub to send the code to the FRONTEND
+    callback_url = f"{FRONTEND_URL}/auth/github/callback"
+    return RedirectResponse(f"https://github.com/login/oauth/authorize?client_id={GITHUB_CLIENT_ID}&redirect_uri={callback_url}&scope=read:user")
+
+
+@router.get("/auth/github/callback")
+async def github_callback(code: str, session: Session = Depends(get_session)):
+    async with httpx.AsyncClient() as client:
+        token_res = await client.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "client_secret": GITHUB_CLIENT_SECRET,
+                "code": code,
+            },
+        )
+        token_data = token_res.json()
+
+    if "error" in token_data:
+        raise HTTPException(status_code=400, detail=f"GitHub Error: {token_data.get('error_description')}")
+
+    access_token = token_data["access_token"]
+
+    async with httpx.AsyncClient() as client:
+        user_res = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        )
+        github_user = user_res.json()
+
+    provider_id = str(github_user["id"])
+    github_login = github_user["login"]
+
+    user = session.exec(select(User).where(User.provider_id == provider_id)).first()
+    api_key = f"sk-surp-{secrets.token_hex(16)}"
+
+    if user:
+        user.api_key = api_key
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        message = "Welcome back!"
+    else:
+        username = github_login
+        if session.exec(select(User).where(User.username == username)).first():
+            username = f"{github_login}_gh_{secrets.token_hex(2)}"
+        user = User(username=username, api_key=api_key, provider="github", provider_id=provider_id)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        message = "Account created successfully!"
+
+    return {
+        "api_key": api_key,
+        "username": user.username,
+        "message": message
+    }
+
+
+@router.get("/users/me", response_model=UserRead)
+def read_users_me(current_user: User = Depends(get_current_user)):
+    return UserRead(id=current_user.id, username=current_user.username, micro_credits=current_user.micro_credits, created_at=current_user.created_at)
+
+
+/* ========================================================================= 
+   FILE: accounts.py
+   ========================================================================= */
+
+import uuid
+from fastapi import APIRouter, Depends, Request
+from sqlmodel import Session, select
+from sqlalchemy import func
+
+from core.database import get_session
+from core.models import TransactionRead, User, UserRead, Submission
+from core.security import get_current_user
+from services.credit_service import CreditService
+
+router = APIRouter(prefix="/accounts", tags=["Accounts"])
+
+
+@router.get("/balance")
+def get_balance(request: Request, current_user: User = Depends(get_current_user)):
+    """
+    Returns the current user's balance in credits.
+    """
+    return CreditService.get_balance(current_user)
+
+
+@router.get("/me", response_model=UserRead)
+def get_me(current_user: User = Depends(get_current_user)):
+    return UserRead(**current_user.model_dump())
+
+
+@router.get("/{user_id}/reputation")
+def get_reputation(user_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    Returns the solver's Proof of Task Execution (PoTE) reputation score based on verifiable executions.
+    """
+    total = session.exec(select(func.count(Submission.id)).where(Submission.solver_id == user_id)).one()
+    if total == 0:
+        return {"user_id": user_id, "score": 0.0, "total_submissions": 0, "successful_submissions": 0}
+        
+    successful = session.exec(select(func.count(Submission.id)).where(Submission.solver_id == user_id, Submission.status == "accepted")).one()
+    score = successful / total
+    return {"user_id": user_id, "score": score, "total_submissions": total, "successful_submissions": successful}
+
+
+@router.get("/transactions", response_model=list[TransactionRead])
+def get_transactions(session: Session = Depends(get_session), current_user: User = Depends(get_current_user)):
+    """
+    Returns the transaction history for the current user.
+    """
+    txs = CreditService.get_transactions(session, current_user.id)
+    return [TransactionRead(**t.model_dump()) for t in txs]
+
+
+/* ========================================================================= 
+   FILE: __init__.py
+   ========================================================================= */
+
+from . import accounts, auth, bounties
+
+__all__ = ["accounts", "auth", "bounties"]
+
+
+/* ========================================================================= 
+   FILE: __init__.py
+   ========================================================================= */
+
+
+
+/* ========================================================================= 
+   FILE: credit_service.py
+   ========================================================================= */
+
+import uuid
+
+from sqlmodel import Session, select
+
+from core.models import Transaction, TransactionType, User
+
+
+class CreditService:
+    SCALE = 1_000_000  # 1,000,000 Micro-credits = 1 Credit
+    VERIFICATION_FEE = 1_000  # 0.001 Credit = 1,000 Micro-credits
+    LISTING_FEE = 0  # Waived to protect requester agents ($1 shield is now a reward limit)
+
+    @staticmethod
+    def to_micro(credits: float) -> int:
+        return int(round(credits * CreditService.SCALE))
+
+    @staticmethod
+    def from_micro(micro_credits: int) -> float:
+        return micro_credits / CreditService.SCALE
+
+    @staticmethod
+    def get_balance(user: User) -> dict:
+        credits = CreditService.from_micro(user.micro_credits)
+        return {"credits": credits, "micro_credits": user.micro_credits}
+
+    @staticmethod
+    def get_transactions(session: Session, user_id: uuid.UUID, limit: int = 10, skip: int = 0) -> list[dict]:
+        """
+        Returns the transaction history for a user, scaled to human-readable credits.
+        """
+        statement = (
+            select(Transaction)
+            .where((Transaction.from_user_id == user_id) | (Transaction.to_user_id == user_id))
+            .order_by(Transaction.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+
+        txns = session.exec(statement).all()
+        return [
+            {
+                "id": str(t.id),
+                "from_user_id": t.from_user_id,
+                "to_user_id": t.to_user_id,
+                "amount": CreditService.from_micro(t.micro_amount),
+                "bounty_id": t.bounty_id,
+                "submission_id": t.submission_id,
+                "type": t.type,
+                "created_at": t.created_at,
+            }
+            for t in txns
+        ]
+
+    @staticmethod
+    def apply_verification_fee(session: Session, user: User, bounty_id: uuid.UUID | None = None):
+        """
+        Deducts a small fee for referee verification services.
+        """
+        if user.micro_credits < CreditService.VERIFICATION_FEE:
+            raise Exception("Insufficient credits for verification fee.")
+
+        user.micro_credits -= CreditService.VERIFICATION_FEE
+        session.add(user)
+
+        txn = Transaction(from_user_id=user.id, micro_amount=CreditService.VERIFICATION_FEE, bounty_id=bounty_id, type=TransactionType.FEE)
+        session.add(txn)
+
+
+/* ========================================================================= 
+   FILE: content_filter.py
+   ========================================================================= */
+
+import re
+
+from fastapi import HTTPException
+
+# Layer 1: The "Reflex" Engine Blocklist
+BLOCKLIST = {
+    # Hate / Bias
+    "hate",
+    "racist",
+    "nazi",
+    "fascist",
+    "slave",
+    "stupid",
+    "idiot",
+    "ugly",
+    "fat",
+}
+
+# Layer 2: DLP (Data Loss Prevention) Regex Patterns
+DLP_PATTERNS = {
+    "OpenAI API Key": r"sk-[a-zA-Z0-9]{30,}",
+    "AWS Access Key": r"AKIA[0-9A-Z]{16}",
+    "Private Key (Generic)": r"-----BEGIN PRIVATE KEY-----",
+    "Email Address": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+}
+
+
+class ContentRuleEngine:
+    @staticmethod
+    def validate(text: str):
+        """
+        Validates the text against blocklist and DLP patterns.
+        Raises HTTPException(400) if a violation is found.
+        """
+        if not text:
+            return
+
+        # Normalize text: lowercase and remove simple punctuation for checking
+        normalized_text = text.lower()
+
+        # 1. Blocklist Check
+        for word in BLOCKLIST:
+            # Use regex to match whole words only to avoid false positives (e.g., "skill" containing "kill")
+            if re.search(r"\b" + re.escape(word) + r"\b", normalized_text):
+                raise HTTPException(status_code=400, detail=f"Content Violation: The word '{word}' is prohibited by the Harmonic Rule Engine.")
+
+        # 2. DLP Check (Confidential Information)
+        for name, pattern in DLP_PATTERNS.items():
+            if re.search(pattern, text):
+                raise HTTPException(status_code=400, detail=f"Security Violation: Your post contains a potential {name}. Please remove confidential data.")
+
+        return True
+
+
+/* ========================================================================= 
+   FILE: safety.py
+   ========================================================================= */
+
+import ast
+
+
+def validate_code_safety(code: str, language: str = "python3") -> str | None:
+    """
+    Statically analyzes code for dangerous patterns.
+    Primarily for Python. For other languages, we rely on sandbox isolation.
+    """
+    if language != "python3":
+        return None
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return f"Syntax Error: {e}"
+
+    DANGEROUS_MODULES = {"os", "sys", "subprocess", "shutil", "importlib", "socket", "multiprocessing", "threading", "pty", "pickle"}
+    DANGEROUS_BUILTINS = {"exec", "eval", "open", "__import__", "input"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in DANGEROUS_MODULES:
+                    return f"Security Error: Import of '{alias.name}' is forbidden."
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".")[0] in DANGEROUS_MODULES:
+                return f"Security Error: Import from '{node.module}' is forbidden."
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in DANGEROUS_BUILTINS:
+                return f"Security Error: Usage of '{node.func.id}' is forbidden."
+    return None

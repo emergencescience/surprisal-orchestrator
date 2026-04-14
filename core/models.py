@@ -5,6 +5,7 @@ from enum import StrEnum
 
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
+from pgvector.sqlalchemy import Vector
 
 
 class BountyStatus(StrEnum):
@@ -124,6 +125,7 @@ class Bounty(BountyBase, table=True):
     evaluation_spec: str | None = None
     runtime: str | None = Field(default="python:3.14")
     bounty_metadata: dict = Field(default_factory=dict, sa_column=sa.Column(sa.JSON))
+    embedding: list[float] | None = Field(default=None, sa_column=sa.Column(Vector(1536)))
     status: BountyStatus = Field(default=BountyStatus.OPEN, sa_column=sa.Column(sa.String, default=BountyStatus.OPEN))
     owner_id: uuid.UUID = Field(foreign_key="user.id", index=True)
     idempotency_key: uuid.UUID = Field(index=True)

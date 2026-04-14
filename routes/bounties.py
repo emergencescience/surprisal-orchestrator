@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from core.database import get_session, limiter
@@ -24,6 +25,20 @@ def user_id_rate_limit(request: Request):
     if user:
         return str(user.id)
     return "anonymous"
+
+
+class BountySearch(BaseModel):
+    query_embedding: list[float]
+    limit: int = 10
+
+
+@router.post("/search", response_model=list[BountyRead])
+def search_bounties(search: BountySearch, session: Session = Depends(get_session)):
+    query = select(Bounty).where(Bounty.status == "open")
+    bounties = session.exec(
+        query.order_by(Bounty.embedding.l2_distance(search.query_embedding)).limit(search.limit)
+    ).all()
+    return [BountyRead(**b.model_dump()) for b in bounties]
 
 
 @router.post("", response_model=BountyRead)
